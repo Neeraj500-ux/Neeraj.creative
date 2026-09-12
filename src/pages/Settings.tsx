@@ -5,7 +5,7 @@ import { supabase } from "../lib/supabase";
 export default function Settings() {
   const { user, data, save } = useWorkspace();
   const existing = (data.settings || [])[0];
-  const [name, setName] = useState(existing?.name || "Creative Adhyayan");
+  const [name, setName] = useState(existing?.name || "creative-crew");
   const [description, setDescription] = useState(
     existing?.description || "One Platform. Every Skill You Need.",
   );
