@@ -2,12 +2,20 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { supabase } from "../lib/supabase";
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  type User as FirebaseUser,
+} from "firebase/auth";
+import { auth } from "../lib/firebase";
 import { seed, demoUsers } from "../lib/seed";
 import type { Entity, User } from "../types";
+
 type Store = {
   user: User | null;
   data: Record<string, Entity[]>;
@@ -20,188 +28,300 @@ type Store = {
   remove: (table: string, id: string) => Promise<void>;
   refresh: () => Promise<void>;
 };
-const Context = createContext<Store>(null!);
-const tables = Object.keys(seed());
+
+const Context = createContext<Store | undefined>(undefined);
+const tableNames = Object.keys(seed());
+
+function storageKey(uid: string) {
+  return `ca-firebase-data:${uid}`;
+}
+
+function readData(uid: string): Record<string, Entity[]> {
+  const saved = localStorage.getItem(storageKey(uid));
+
+  if (!saved) return seed();
+
+  const parsed: unknown = JSON.parse(saved);
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Saved workspace data is invalid.");
+  }
+
+  const result = parsed as Record<string, Entity[]>;
+
+  for (const table of tableNames) {
+    if (result[table] !== undefined && !Array.isArray(result[table])) {
+      throw new Error(`Saved ${table} data is invalid.`);
+    }
+  }
+
+  return result;
+}
+
+function workspaceUser(firebaseUser: FirebaseUser): User {
+  // Keep the existing User shape without granting administrator access.
+  const employee = demoUsers.find(
+    (candidate) =>
+      !["admin", "super_admin", "leader"].includes(candidate.role),
+  );
+
+  if (!employee) {
+    throw new Error("An employee profile template is missing in lib/seed.");
+  }
+
+  return {
+    ...employee,
+    id: firebaseUser.uid,
+    name:
+      firebaseUser.displayName ||
+      firebaseUser.email?.split("@")[0] ||
+      "Workspace member",
+    email: firebaseUser.email || "",
+    active: true,
+    team_id: null,
+  } as User;
+}
+
 export function Provider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() =>
-    supabase ? null : JSON.parse(sessionStorage.getItem("ca-user") || "null"),
-  );
-  const [data, setData] = useState<Record<string, Entity[]>>(() =>
-    supabase
-      ? {}
-      : JSON.parse(localStorage.getItem("ca-data") || "null") || seed(),
-  );
-  const [loading, setLoading] = useState(!!supabase);
+  const [user, setUser] = useState<User | null>(null);
+  const [data, setData] = useState<Record<string, Entity[]>>({});
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const uidRef = useRef<string | null>(null);
+
+  function clearWorkspace() {
+    uidRef.current = null;
+    setUser(null);
+    setData({});
+  }
+
+  function loadWorkspace(firebaseUser: FirebaseUser) {
+    const profile = workspaceUser(firebaseUser);
+    const records = readData(firebaseUser.uid);
+
+    uidRef.current = firebaseUser.uid;
+    setUser(profile);
+    setData(records);
+    setError("");
+  }
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      (firebaseUser) => {
+        setLoading(true);
+
+        try {
+          if (firebaseUser) {
+            loadWorkspace(firebaseUser);
+          } else {
+            clearWorkspace();
+            setError("");
+          }
+        } catch (err) {
+          clearWorkspace();
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Unable to load your workspace.",
+          );
+        } finally {
+          setLoading(false);
+        }
+      },
+      (err) => {
+        clearWorkspace();
+        setError(err.message);
+        setLoading(false);
+      },
+    );
+
+    return unsubscribe;
+  }, []);
+
   async function refresh() {
-    if (!supabase) return;
     setLoading(true);
+
     try {
-      const {
-        data: { user: auth },
-      } = await supabase.auth.getUser();
-      if (!auth) {
-        setUser(null);
-        return;
+      if (auth.currentUser) {
+        loadWorkspace(auth.currentUser);
+      } else {
+        clearWorkspace();
       }
-      const { data: profile, error: e } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", auth.id)
-        .single();
-      if (e || !profile?.active)
-        throw Error(
-          "Account inactive or profile missing. Contact your administrator.",
-        );
-      setUser(profile);
-      const result: Record<string, Entity[]> = {};
-      for (const table of tables) {
-        if (
-          [
-            "payroll",
-            "expenses",
-            "invoices",
-            "settings",
-            "clients",
-            "activity_logs",
-            "automations",
-          ].includes(table) &&
-          !["admin", "super_admin"].includes(profile.role)
-        )
-          continue;
-        const { data: rows, error } = await supabase
-          .from(table)
-          .select("*")
-          .order("created_at", { ascending: false });
-        if (error) throw Error(table + ": " + error.message);
-        result[table] = rows || [];
-      }
-      setData(result);
-      setError("");
-    } catch (e) {
-      setError((e as Error).message);
-      setUser(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to refresh workspace.",
+      );
+      throw err;
     } finally {
       setLoading(false);
     }
   }
-  useEffect(() => {
-    refresh();
-    const subscription = supabase?.auth.onAuthStateChange(() =>
-      setTimeout(refresh, 0),
-    );
-    const channel = supabase
-      ?.channel("workspace")
-      .on("postgres_changes", { event: "*", schema: "public" }, () => refresh())
-      .subscribe();
-    return () => {
-      subscription?.data.subscription.unsubscribe();
-      if (channel) supabase?.removeChannel(channel);
-    };
-  }, []);
-  useEffect(() => {
-    if (!supabase) localStorage.setItem("ca-data", JSON.stringify(data));
-  }, [data]);
+
   async function login(email: string, password: string) {
-    if (!supabase)
-      throw Error("Use a demo role below, or configure Supabase to sign in.");
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) throw error;
-    await refresh();
-  }
-  function demo(id: string) {
-    const u = demoUsers.find((x) => x.id === id)!;
-    setUser(u);
-    sessionStorage.setItem("ca-user", JSON.stringify(u));
-  }
-  async function logout() {
-    await supabase?.auth.signOut();
-    sessionStorage.removeItem("ca-user");
-    setUser(null);
-  }
-  async function save(table: string, row: Partial<Entity>) {
-    const id = row.id || crypto.randomUUID();
-    const existing = (data[table] || []).find((x) => x.id === id);
-    const full: Record<string, unknown> = {
-      team_id: user?.team_id,
-      ...existing,
-      ...row,
-      id,
-      owner_id: existing?.owner_id || user?.id,
-      created_at: existing?.created_at || new Date().toISOString(),
-    };
-    for (const k of ["assignee", "project_id", "client_id"])
-      if (full[k] === "") full[k] = null;
-    if (supabase) {
-      const { error } = await supabase.from(table).upsert(full);
-      if (error) throw error;
-      await refresh();
-    } else {
-      setData((old) => ({
-        ...old,
-        [table]: existing
-          ? (old[table] || []).map((x) => (x.id === id ? (full as Entity) : x))
-          : [full as Entity, ...(old[table] || [])],
-        activity_logs: [
-          {
-            id: crypto.randomUUID(),
-            name:
-              user?.name +
-              " " +
-              (existing ? "updated" : "created") +
-              " " +
-              table,
-            status: "Recorded",
-            description: JSON.stringify({ before: existing, after: full }),
-            created_at: new Date().toISOString(),
-          },
-          ...(old.activity_logs || []),
-        ],
-        notifications:
-          table === "tasks"
-            ? [
-                {
-                  id: crypto.randomUUID(),
-                  name: full.name + " · " + full.status,
-                  status: "Unread",
-                  assignee: full.assignee as string,
-                  created_at: new Date().toISOString(),
-                },
-                ...(old.notifications || []),
-              ]
-            : old.notifications || [],
-      }));
+    setError("");
+
+    try {
+      const credential = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password,
+      );
+
+      loadWorkspace(credential.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sign in.");
+      throw err;
     }
   }
-  async function remove(table: string, id: string) {
-    if (supabase) {
-      if (table === "employees") {
-        const { error } = await supabase
-          .from("employees")
-          .update({ status: "Inactive" })
-          .eq("id", id);
-        if (error) throw error;
-      }
-      const { error } = await supabase.from(table).delete().eq("id", id);
-      if (error) throw error;
-      await refresh();
-    } else
-      setData((old) => ({
-        ...old,
-        [table]: (old[table] || []).filter((x) => x.id !== id),
-        activity_logs: [
-          {
-            id: crypto.randomUUID(),
-            name: user?.name + " deleted " + table + " " + id,
-            status: "Recorded",
-          },
-          ...(old.activity_logs || []),
-        ],
-      }));
+
+  function demo(_id: string) {
+    setError("Demo login is disabled. Sign in with your Firebase account.");
   }
+
+  async function logout() {
+    try {
+      await signOut(auth);
+      clearWorkspace();
+      sessionStorage.removeItem("ca-user");
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sign out.");
+      throw err;
+    }
+  }
+
+  function requireUser() {
+    if (
+      !user ||
+      !auth.currentUser ||
+      auth.currentUser.uid !== user.id ||
+      uidRef.current !== user.id
+    ) {
+      throw new Error("Please sign in before changing workspace data.");
+    }
+
+    return user;
+  }
+
+  function checkTable(table: string) {
+    if (!tableNames.includes(table)) {
+      throw new Error(`Unknown workspace table: ${table}`);
+    }
+  }
+
+  function persist(next: Record<string, Entity[]>, uid: string) {
+    // Save first so storage errors do not silently discard changes.
+    localStorage.setItem(storageKey(uid), JSON.stringify(next));
+    setData(next);
+  }
+
+  async function save(table: string, row: Partial<Entity>) {
+    try {
+      const currentUser = requireUser();
+      checkTable(table);
+
+      const currentData = readData(currentUser.id);
+      const id = row.id || crypto.randomUUID();
+      const existing = (currentData[table] || []).find(
+        (item) => item.id === id,
+      );
+
+      const full: Record<string, unknown> = {
+        team_id: currentUser.team_id,
+        ...existing,
+        ...row,
+        id,
+        owner_id: existing?.owner_id || currentUser.id,
+        created_at: existing?.created_at || new Date().toISOString(),
+      };
+
+      for (const field of ["assignee", "project_id", "client_id"]) {
+        if (full[field] === "") full[field] = null;
+      }
+
+      const next: Record<string, Entity[]> = {
+        ...currentData,
+        [table]: existing
+          ? (currentData[table] || []).map((item) =>
+              item.id === id ? (full as Entity) : item,
+            )
+          : [full as Entity, ...(currentData[table] || [])],
+      };
+
+      const activity = {
+        id: crypto.randomUUID(),
+        name: `${currentUser.name} ${
+          existing ? "updated" : "created"
+        } ${table}`,
+        status: "Recorded",
+        description: JSON.stringify({ before: existing, after: full }),
+        created_at: new Date().toISOString(),
+      } as Entity;
+
+      next.activity_logs = [
+        activity,
+        ...(next.activity_logs || []),
+      ];
+
+      if (table === "tasks") {
+        const notification = {
+          id: crypto.randomUUID(),
+          name: `${full.name || "Task"} · ${full.status || "Updated"}`,
+          status: "Unread",
+          assignee: full.assignee,
+          created_at: new Date().toISOString(),
+        } as Entity;
+
+        next.notifications = [
+          notification,
+          ...(next.notifications || []),
+        ];
+      }
+
+      persist(next, currentUser.id);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save.");
+      throw err;
+    }
+  }
+
+  async function remove(table: string, id: string) {
+    try {
+      const currentUser = requireUser();
+      checkTable(table);
+
+      const currentData = readData(currentUser.id);
+
+      const next: Record<string, Entity[]> = {
+        ...currentData,
+        [table]: (currentData[table] || []).filter(
+          (item) => item.id !== id,
+        ),
+      };
+
+      const activity = {
+        id: crypto.randomUUID(),
+        name: `${currentUser.name} deleted ${table} ${id}`,
+        status: "Recorded",
+        created_at: new Date().toISOString(),
+      } as Entity;
+
+      next.activity_logs = [
+        activity,
+        ...(next.activity_logs || []),
+      ];
+
+      persist(next, currentUser.id);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete.");
+      throw err;
+    }
+  }
+
   return (
     <Context.Provider
       value={{
@@ -221,14 +341,28 @@ export function Provider({ children }: { children: ReactNode }) {
     </Context.Provider>
   );
 }
-export const useWorkspace = () => useContext(Context);
+
+export function useWorkspace() {
+  const context = useContext(Context);
+
+  if (!context) {
+    throw new Error("useWorkspace must be used inside Provider.");
+  }
+
+  return context;
+}
+
 export function scoped(rows: Entity[], user: User | null) {
   if (!user) return [];
+
   if (["admin", "super_admin"].includes(user.role)) return rows;
+
   return rows.filter(
-    (r) =>
-      r.assignee === user.id ||
-      r.owner_id === user.id ||
-      (user.role === "leader" && r.team_id === user.team_id),
+    (row) =>
+      row.assignee === user.id ||
+      row.owner_id === user.id ||
+      (user.role === "leader" &&
+        user.team_id != null &&
+        row.team_id === user.team_id),
   );
 }
