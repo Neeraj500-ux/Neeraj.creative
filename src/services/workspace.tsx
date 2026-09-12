@@ -40,25 +40,22 @@ type Snapshot = {
 };
 
 const Context = createContext<Store | undefined>(undefined);
-
 const allowedTables = new Set(Object.keys(seed()));
-const adminRoles = new Set(["admin", "super_admin"]);
 
-function storageKey(uid: string) {
-  // Preserve data saved by the previous version.
+function isAdmin(user: User): boolean {
+  return ["admin", "super_admin"].includes(user.role);
+}
+
+function storageKey(uid: string): string {
   return `ca-firebase-data:${uid}`;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value)
-  );
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof FirebaseError) {
+function getErrorMessage(cause: unknown): string {
+  if (cause instanceof FirebaseError) {
     const messages: Record<string, string> = {
       "auth/invalid-email": "Please enter a valid email address.",
       "auth/invalid-credential": "Incorrect email or password.",
@@ -66,37 +63,37 @@ function errorMessage(error: unknown): string {
       "auth/wrong-password": "Incorrect email or password.",
       "auth/user-disabled": "This account has been disabled.",
       "auth/too-many-requests":
-        "Too many login attempts. Please try again later.",
+        "Too many attempts. Please try again later.",
       "auth/network-request-failed":
         "Check your internet connection and try again.",
       "auth/operation-not-allowed":
         "Enable Email/Password login in Firebase Authentication.",
       "auth/unauthorized-domain":
-        "Add this website domain to Firebase authorized domains.",
+        "Add this domain to Firebase authorized domains.",
     };
 
-    return messages[error.code] || "Firebase authentication failed.";
+    return messages[cause.code] ?? `Authentication failed (${cause.code}).`;
   }
 
-  if (
-    error instanceof DOMException &&
-    ["QuotaExceededError", "NS_ERROR_DOM_QUOTA_REACHED"].includes(
-      error.name,
-    )
-  ) {
-    return "Browser storage is full. Your change could not be saved.";
+  if (cause instanceof DOMException) {
+    if (
+      cause.name === "QuotaExceededError" ||
+      cause.name === "NS_ERROR_DOM_QUOTA_REACHED"
+    ) {
+      return "Browser storage is full. Your changes were not saved.";
+    }
+
+    if (cause.name === "SecurityError") {
+      return "Browser storage is unavailable. Check your browser settings.";
+    }
   }
 
-  if (error instanceof DOMException && error.name === "SecurityError") {
-    return "Browser storage is unavailable. Check your browser settings.";
+  if (cause instanceof SyntaxError) {
+    return "Saved workspace data cannot be read. Existing storage was preserved.";
   }
 
-  if (error instanceof SyntaxError) {
-    return "Saved workspace data is unreadable. Your saved data was preserved.";
-  }
-
-  return error instanceof Error
-    ? error.message
+  return cause instanceof Error
+    ? cause.message
     : "Something went wrong. Please try again.";
 }
 
@@ -146,19 +143,13 @@ function readData(uid: string): WorkspaceData {
   return result;
 }
 
-function workspaceUser(firebaseUser: FirebaseUser): User {
-  // Use an employee template to preserve the existing project User shape.
-  // Firebase accounts never receive admin access automatically.
+function createProfile(firebaseUser: FirebaseUser): User {
   const employee = demoUsers.find(
-    (candidate) =>
-      !adminRoles.has(candidate.role) &&
-      candidate.role !== "leader",
+    (candidate) => !isAdmin(candidate) && candidate.role !== "leader",
   );
 
   if (!employee) {
-    throw new Error(
-      "No employee profile template was found in src/lib/seed.ts.",
-    );
+    throw new Error("An employee profile template is missing in seed.ts.");
   }
 
   return {
@@ -168,23 +159,23 @@ function workspaceUser(firebaseUser: FirebaseUser): User {
       firebaseUser.displayName?.trim() ||
       firebaseUser.email?.split("@")[0] ||
       "Workspace member",
-    email: firebaseUser.email || "",
+    email: firebaseUser.email ?? "",
     active: true,
     team_id: null,
   } as User;
 }
 
-function validateTable(table: string) {
+function validateTable(table: string): void {
   if (!allowedTables.has(table)) {
     throw new Error(`Unknown workspace table: ${table}`);
   }
 }
 
-function makeActivity(
+function createActivity(
   user: User,
   action: string,
   table: string,
-  details?: unknown,
+  details: unknown,
 ): Entity {
   return {
     id: crypto.randomUUID(),
@@ -192,9 +183,7 @@ function makeActivity(
     status: "Recorded",
     owner_id: user.id,
     created_at: new Date().toISOString(),
-    ...(details === undefined
-      ? {}
-      : { description: JSON.stringify(details) }),
+    description: JSON.stringify(details),
   } as Entity;
 }
 
@@ -206,11 +195,10 @@ export function Provider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Refs keep consecutive mutations independent of React render timing.
-  const snapshotRef = useRef<Snapshot>(snapshot);
+  const snapshotRef = useRef(snapshot);
   const mountedRef = useRef(false);
-  const loginPendingRef = useRef(false);
-  const logoutPendingRef = useRef(false);
+  const authBusyRef = useRef(false);
+  const operationVersionRef = useRef(0);
 
   const publish = useCallback((next: Snapshot) => {
     snapshotRef.current = next;
@@ -220,12 +208,10 @@ export function Provider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const reportError = useCallback((cause: unknown) => {
-    const message = errorMessage(cause);
+  const reportError = useCallback((cause: unknown): Error => {
+    const message = getErrorMessage(cause);
 
-    if (mountedRef.current) {
-      setError(message);
-    }
+    if (mountedRef.current) setError(message);
 
     return new Error(message);
   }, []);
@@ -236,28 +222,26 @@ export function Provider({ children }: { children: ReactNode }) {
 
   const loadWorkspace = useCallback(
     (firebaseUser: FirebaseUser) => {
-      const profile = workspaceUser(firebaseUser);
+      const profile = createProfile(firebaseUser);
       const records = readData(firebaseUser.uid);
 
-      // Never publish records for a session that has changed.
       if (auth.currentUser?.uid !== firebaseUser.uid) return;
 
       publish({ user: profile, data: records });
 
-      if (mountedRef.current) {
-        setError("");
-      }
+      if (mountedRef.current) setError("");
     },
     [publish],
   );
 
   useEffect(() => {
     mountedRef.current = true;
+    let active = true;
 
     const unsubscribe = onAuthStateChanged(
       auth,
       (firebaseUser) => {
-        if (!mountedRef.current) return;
+        if (!active) return;
 
         try {
           if (firebaseUser) {
@@ -270,13 +254,11 @@ export function Provider({ children }: { children: ReactNode }) {
           clearWorkspace();
           reportError(cause);
         } finally {
-          if (mountedRef.current) {
-            setLoading(false);
-          }
+          if (active && !authBusyRef.current) setLoading(false);
         }
       },
       (cause) => {
-        if (!mountedRef.current) return;
+        if (!active) return;
 
         clearWorkspace();
         reportError(cause);
@@ -284,62 +266,45 @@ export function Provider({ children }: { children: ReactNode }) {
       },
     );
 
-    // Sync workspace changes made in another tab of the same browser.
-    function handleStorage(event: StorageEvent) {
-      const firebaseUser = auth.currentUser;
-
-      if (
-        !firebaseUser ||
-        event.storageArea !== window.localStorage ||
-        (event.key !== null &&
-          event.key !== storageKey(firebaseUser.uid))
-      ) {
-        return;
-      }
+    const handleStorage = (event: StorageEvent) => {
+      if (!active) return;
 
       try {
+        const firebaseUser = auth.currentUser;
+
+        if (
+          !firebaseUser ||
+          event.storageArea !== window.localStorage ||
+          (event.key !== null &&
+            event.key !== storageKey(firebaseUser.uid))
+        ) {
+          return;
+        }
+
         loadWorkspace(firebaseUser);
       } catch (cause) {
-        // Preserve the current snapshot if external data is invalid.
         reportError(cause);
       }
-    }
+    };
 
     window.addEventListener("storage", handleStorage);
 
     return () => {
+      active = false;
       mountedRef.current = false;
+      operationVersionRef.current += 1;
+      authBusyRef.current = false;
       unsubscribe();
       window.removeEventListener("storage", handleStorage);
     };
   }, [clearWorkspace, loadWorkspace, reportError]);
 
-  const refresh = useCallback(async () => {
-    if (mountedRef.current) {
-      setLoading(true);
-    }
-
-    try {
-      if (auth.currentUser) {
-        loadWorkspace(auth.currentUser);
-      } else {
-        clearWorkspace();
-
-        if (mountedRef.current) setError("");
-      }
-    } catch (cause) {
-      throw reportError(cause);
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [clearWorkspace, loadWorkspace, reportError]);
-
   const login = useCallback(
-    async (email: string, password: string) => {
-      if (loginPendingRef.current || logoutPendingRef.current) {
-        throw new Error("Another authentication request is in progress.");
+    async (email: string, password: string): Promise<void> => {
+      if (authBusyRef.current) {
+        throw reportError(
+          new Error("Another authentication request is in progress."),
+        );
       }
 
       const cleanEmail = email.trim();
@@ -352,9 +317,13 @@ export function Provider({ children }: { children: ReactNode }) {
         throw reportError(new Error("Please enter your password."));
       }
 
-      loginPendingRef.current = true;
+      authBusyRef.current = true;
+      const version = ++operationVersionRef.current;
 
-      if (mountedRef.current) setError("");
+      if (mountedRef.current) {
+        setError("");
+        setLoading(true);
+      }
 
       try {
         const credential = await signInWithEmailAndPassword(
@@ -363,48 +332,99 @@ export function Provider({ children }: { children: ReactNode }) {
           password,
         );
 
-        if (mountedRef.current) {
+        if (
+          mountedRef.current &&
+          operationVersionRef.current === version
+        ) {
           loadWorkspace(credential.user);
         }
       } catch (cause) {
+        if (operationVersionRef.current !== version) {
+          throw new Error(getErrorMessage(cause));
+        }
+
         throw reportError(cause);
       } finally {
-        loginPendingRef.current = false;
+        if (operationVersionRef.current === version) {
+          authBusyRef.current = false;
+          if (mountedRef.current) setLoading(false);
+        }
       }
     },
     [loadWorkspace, reportError],
   );
 
-  const demo = useCallback((_id: string) => {
+  const logout = useCallback(async (): Promise<void> => {
+    if (authBusyRef.current) {
+      throw reportError(
+        new Error("Another authentication request is in progress."),
+      );
+    }
+
+    authBusyRef.current = true;
+    const version = ++operationVersionRef.current;
+
+    if (mountedRef.current) {
+      setError("");
+      setLoading(true);
+    }
+
+    try {
+      await signOut(auth);
+
+      if (operationVersionRef.current === version) {
+        clearWorkspace();
+      }
+    } catch (cause) {
+      if (operationVersionRef.current !== version) {
+        throw new Error(getErrorMessage(cause));
+      }
+
+      throw reportError(cause);
+    } finally {
+      if (operationVersionRef.current === version) {
+        authBusyRef.current = false;
+        if (mountedRef.current) setLoading(false);
+      }
+    }
+  }, [clearWorkspace, reportError]);
+
+  const demo = useCallback((_id: string): void => {
     if (mountedRef.current) {
       setError("Demo login is disabled. Use your Firebase account.");
     }
   }, []);
 
-  const logout = useCallback(async () => {
-    if (logoutPendingRef.current || loginPendingRef.current) {
-      throw new Error("Another authentication request is in progress.");
+  const refresh = useCallback(async (): Promise<void> => {
+    if (authBusyRef.current) {
+      throw reportError(
+        new Error("Wait for the authentication request to finish."),
+      );
     }
 
-    logoutPendingRef.current = true;
+    if (mountedRef.current) setLoading(true);
 
     try {
-      await signOut(auth);
-      clearWorkspace();
+      const firebaseUser = auth.currentUser;
 
-      if (mountedRef.current) setError("");
+      if (firebaseUser) {
+        loadWorkspace(firebaseUser);
+      } else {
+        clearWorkspace();
+        if (mountedRef.current) setError("");
+      }
     } catch (cause) {
       throw reportError(cause);
     } finally {
-      logoutPendingRef.current = false;
+      if (mountedRef.current) setLoading(false);
     }
-  }, [clearWorkspace, reportError]);
+  }, [clearWorkspace, loadWorkspace, reportError]);
 
   const requireUser = useCallback((): User => {
     const currentUser = snapshotRef.current.user;
 
     if (
-      logoutPendingRef.current ||
+      authBusyRef.current ||
       !currentUser ||
       auth.currentUser?.uid !== currentUser.id
     ) {
@@ -415,12 +435,11 @@ export function Provider({ children }: { children: ReactNode }) {
   }, []);
 
   const persist = useCallback(
-    (next: WorkspaceData, currentUser: User) => {
+    (next: WorkspaceData, currentUser: User): void => {
       if (auth.currentUser?.uid !== currentUser.id) {
         throw new Error("Your session changed. Please sign in again.");
       }
 
-      // Persist before updating the UI so a failed write stays visible.
       window.localStorage.setItem(
         storageKey(currentUser.id),
         JSON.stringify(next),
@@ -434,7 +453,7 @@ export function Provider({ children }: { children: ReactNode }) {
   );
 
   const save = useCallback(
-    async (table: string, row: Partial<Entity>) => {
+    async (table: string, row: Partial<Entity>): Promise<void> => {
       try {
         const currentUser = requireUser();
         validateTable(table);
@@ -450,29 +469,29 @@ export function Provider({ children }: { children: ReactNode }) {
         }
 
         const currentData = readData(currentUser.id);
-        const rows = currentData[table] || [];
+        const rows = currentData[table] ?? [];
         const existing = rows.find((item) => item.id === id);
 
-        // Undefined values should not erase existing fields.
         const updates = Object.fromEntries(
           Object.entries(row).filter(([, value]) => value !== undefined),
         );
 
-        const full: Record<string, unknown> = {
+        const fields: Record<string, unknown> = {
           team_id: currentUser.team_id,
           ...existing,
           ...updates,
-          id,
           owner_id: existing?.owner_id || currentUser.id,
-          created_at:
-            existing?.created_at || new Date().toISOString(),
+          created_at: existing?.created_at || new Date().toISOString(),
         };
 
         for (const field of ["assignee", "project_id", "client_id"]) {
-          if (full[field] === "") full[field] = null;
+          if (fields[field] === "") fields[field] = null;
         }
 
-        const record = full as Entity;
+        const record = {
+          ...fields,
+          id,
+        } as Entity;
 
         const next: WorkspaceData = {
           ...currentData,
@@ -481,34 +500,36 @@ export function Provider({ children }: { children: ReactNode }) {
             : [record, ...rows],
         };
 
-        // Avoid generating audit entries for audit entries themselves.
-        if (table !== "activity_logs" && allowedTables.has("activity_logs")) {
+        if (
+          table !== "activity_logs" &&
+          allowedTables.has("activity_logs")
+        ) {
           next.activity_logs = [
-            makeActivity(
+            createActivity(
               currentUser,
               existing ? "updated" : "created",
               table,
               { before: existing, after: record },
             ),
-            ...(next.activity_logs || []),
+            ...(next.activity_logs ?? []),
           ];
         }
 
         if (table === "tasks" && allowedTables.has("notifications")) {
           const notification = {
             id: crypto.randomUUID(),
-            name: `${full.name || "Task"} · ${
-              full.status || "Updated"
-            }`,
+            name: `${String(fields.name || "Task")} · ${String(
+              fields.status || "Updated",
+            )}`,
             status: "Unread",
-            assignee: full.assignee ?? null,
+            assignee: fields.assignee ?? null,
             owner_id: currentUser.id,
             created_at: new Date().toISOString(),
           } as Entity;
 
           next.notifications = [
             notification,
-            ...(next.notifications || []),
+            ...(next.notifications ?? []),
           ];
         }
 
@@ -521,7 +542,7 @@ export function Provider({ children }: { children: ReactNode }) {
   );
 
   const remove = useCallback(
-    async (table: string, id: string) => {
+    async (table: string, id: string): Promise<void> => {
       try {
         const currentUser = requireUser();
         validateTable(table);
@@ -531,23 +552,28 @@ export function Provider({ children }: { children: ReactNode }) {
         }
 
         const currentData = readData(currentUser.id);
-        const rows = currentData[table] || [];
+        const rows = currentData[table] ?? [];
         const existing = rows.find((item) => item.id === id);
 
-        // Missing records require no write or duplicate audit entry.
-        if (!existing) return;
+        if (!existing) {
+          if (mountedRef.current) setError("");
+          return;
+        }
 
         const next: WorkspaceData = {
           ...currentData,
           [table]: rows.filter((item) => item.id !== id),
         };
 
-        if (table !== "activity_logs" && allowedTables.has("activity_logs")) {
+        if (
+          table !== "activity_logs" &&
+          allowedTables.has("activity_logs")
+        ) {
           next.activity_logs = [
-            makeActivity(currentUser, "deleted", table, {
+            createActivity(currentUser, "deleted", table, {
               before: existing,
             }),
-            ...(next.activity_logs || []),
+            ...(next.activity_logs ?? []),
           ];
         }
 
@@ -585,7 +611,11 @@ export function Provider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <Context.Provider value={value}>{children}</Context.Provider>;
+  return (
+    <Context.Provider value={value}>
+      {children}
+    </Context.Provider>
+  );
 }
 
 export function useWorkspace(): Store {
@@ -600,8 +630,7 @@ export function useWorkspace(): Store {
 
 export function scoped(rows: Entity[], user: User | null): Entity[] {
   if (!user) return [];
-
-  if (adminRoles.has(user.role)) return rows;
+  if (isAdmin(user)) return rows;
 
   return rows.filter(
     (row) =>
