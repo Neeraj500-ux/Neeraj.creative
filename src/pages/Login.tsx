@@ -17,6 +17,10 @@ import {
   LoaderCircle,
   LockKeyhole,
   Mail,
+  Sparkles,
+  CalendarDays,
+  Video,
+  BookOpen,
   ShieldCheck,
 } from "lucide-react";
 import { auth, googleProvider } from "../lib/firebase";
@@ -145,26 +149,28 @@ export default function Login() {
     <main className="fb-login">
       <style>{styles}</style>
 
+      <div className="fb-background-orb fb-orb-one" aria-hidden="true" />
+      <div className="fb-background-orb fb-orb-two" aria-hidden="true" />
       <div className="fb-shell">
         <section className="fb-story">
           <div className="fb-brand">
             <span className="fb-brand-icon"><Layers size={25} /></span>
             <div>
-              Creative Adhyayan
+              creative-crew
               <small>CREATIVE WORKSPACE</small>
             </div>
           </div>
 
           <div className="fb-story-content">
-            <span className="fb-pill">PLAN. CREATE. GROW.</span>
+            <span className="fb-pill"><Sparkles size={13} aria-hidden="true" /> PLAN. CREATE. GROW.</span>
             <h1>
-              Your people.<br />
-              Your projects.<br />
-              <span>Perfectly in sync.</span>
+              Big ideas.<br />
+              Creative minds.<br />
+              <span>One shared space.</span>
             </h1>
             <p>
-              One place for your team to plan, collaborate and bring great
-              ideas to life.
+              Welcome to creative-crew — your space to organize projects,
+              collaborate with your team and turn creative ideas into meaningful work.
             </p>
 
             <div className="fb-benefits">
@@ -175,15 +181,14 @@ export default function Login() {
               )}
             </div>
 
-            <div className="fb-preview">
-              <span>YOUR CREATIVE WORKSPACE</span>
-              <h2>Great work happens together.</h2>
-              <p>Connect your team. Organize your work. Keep moving.</p>
+            <div className="fb-preview" aria-label="Illustrative creative workflow">
+              <div className="fb-preview-top"><span className="fb-mini-brand"><Layers size={15} /> Creative studio</span><span className="fb-live"><i /> Workspace preview</span></div>
+              <h2>A little structure. A lot of possibility.</h2>
+              <p>Give your next idea a place to grow.</p>
+              <div className="fb-task"><span className="fb-task-icon"><Video size={18} /></span><div><strong>Bring your vision to life</strong><small>Plan your next creative project</small></div><span className="fb-task-tag">CREATE</span></div>
+              <div className="fb-task"><span className="fb-task-icon"><BookOpen size={18} /></span><div><strong>Learn. Share. Keep growing.</strong><small>Keep ideas and resources together</small></div><Check size={17} className="fb-task-check" /></div>
               <div className="fb-preview-line" />
-              <div className="fb-avatars">
-                <span>CA</span><span>NS</span><span>RM</span>
-                <small>Ideas become action.</small>
-              </div>
+              <div className="fb-preview-bottom"><span><CalendarDays size={15} /> Make space for great work.</span><span className="fb-mini-dots"><i /><i /><i /></span></div>
             </div>
           </div>
 
@@ -194,14 +199,15 @@ export default function Login() {
 
         <section className="fb-panel" aria-labelledby="login-title">
           <span className="fb-security">
-            <ShieldCheck size={16} /> Firebase Authentication
+            <ShieldCheck size={16} /> Secure workspace access
           </span>
 
           <div className="fb-form-content">
             <div className="fb-welcome-icon"><Layers size={27} /></div>
-            <h2 id="login-title">Welcome back.</h2>
+            <span className="fb-eyebrow">YOUR NEXT CHAPTER STARTS HERE</span>
+            <h2 id="login-title">Welcome back<span className="fb-title-dot">.</span></h2>
             <p className="fb-description">
-              Sign in to your creative workspace.
+              Your ideas, your team, your workspace. Let’s get back to creating.
             </p>
 
             {error && <div className="fb-message fb-error" role="alert">{error}</div>}
@@ -223,7 +229,7 @@ export default function Login() {
 
             <div className="fb-divider"><span>or use your email</span></div>
 
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} aria-busy={busy !== null}>
               <label htmlFor="login-email">Work email</label>
               <div className="fb-input">
                 <Mail size={19} aria-hidden="true" />
@@ -232,7 +238,7 @@ export default function Login() {
                   name="email"
                   type="email"
                   autoComplete="username"
-                  placeholder="you@example.com"
+                  placeholder="Enter your email address"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   disabled={busy !== null}
@@ -268,6 +274,7 @@ export default function Login() {
                 <button
                   type="button"
                   className="fb-toggle"
+                  disabled={busy !== null}
                   onClick={() => setShowPassword((value) => !value)}
                   aria-label={showPassword ? "Hide password" : "Show password"}
                   aria-pressed={showPassword}
@@ -295,7 +302,7 @@ export default function Login() {
           </div>
 
           <footer className="fb-footer">
-            © {new Date().getFullYear()} Creative Adhyayan
+            © {new Date().getFullYear()} creative-crew
           </footer>
         </section>
       </div>
@@ -436,4 +443,78 @@ const styles = `
 @media(prefers-reduced-motion:reduce) {
   .fb-login *,.fb-login-loading * {animation:none!important;transition:none!important;}
 }
+
+/* Premium blue-white finish. Scoped to this page. */
+.fb-login,.fb-login-loading {box-sizing:border-box;position:relative;isolation:isolate;padding:40px 24px;background:radial-gradient(ellipse at 8% 12%,#dbeafe 0,transparent 45%),radial-gradient(ellipse at 95% 85%,#e0e7ff 0,transparent 42%),#f5f8ff;}
+.fb-login {overflow:hidden;}
+.fb-background-orb {position:absolute;z-index:-1;width:360px;height:360px;border-radius:50%;filter:blur(65px);opacity:.4;pointer-events:none;animation:fb-drift 14s ease-in-out infinite alternate;}
+.fb-orb-one {top:-140px;left:-140px;background:#93c5fd;}
+.fb-orb-two {bottom:-160px;right:-120px;background:#a5b4fc;animation-delay:-7s;}
+.fb-shell {position:relative;max-width:1180px;border-radius:32px;grid-template-columns:1.12fr 1fr;box-shadow:0 35px 100px #1e40af18,0 6px 22px #1e40af08;animation:fb-enter .7s ease both;}
+.fb-story {padding:38px 42px;overflow:hidden;background:radial-gradient(ellipse at 90% 4%,#60a5fa80,transparent 54%),linear-gradient(145deg,#173c91 0%,#2158cf 58%,#2563eb 100%);}
+.fb-story::before {content:"";position:absolute;inset:0;background-image:linear-gradient(#ffffff05 1px,transparent 1px),linear-gradient(90deg,#ffffff05 1px,transparent 1px);background-size:42px 42px;pointer-events:none;mask-image:linear-gradient(#000,transparent);}
+.fb-story::after {content:"";position:absolute;width:360px;height:360px;right:-230px;bottom:-170px;border-radius:50%;border:50px solid #ffffff08;box-shadow:0 0 0 35px #ffffff04;pointer-events:none;animation:fb-drift 12s ease-in-out infinite alternate;}
+.fb-story > * {position:relative;z-index:1;}
+.fb-brand-icon {box-shadow:inset 0 1px 0 #ffffff25,0 8px 20px #10285520;backdrop-filter:blur(18px);}
+.fb-brand small {letter-spacing:2.5px;}
+.fb-story-content {padding:48px 0 30px;}
+.fb-pill {display:inline-flex;align-items:center;gap:8px;background:#ffffff0d;color:#e5efff;padding:9px 13px;}
+.fb-story h1 {font-size:clamp(39px,4.2vw,55px);letter-spacing:-2.5px;line-height:1.12;margin:24px 0 18px;}
+.fb-story h1 span {background:linear-gradient(100deg,#dbeafe,#93c5fd,#e0f2fe);background-size:200% auto;background-clip:text;-webkit-background-clip:text;color:transparent;animation:fb-gradient 8s ease infinite;}
+.fb-story-content > p {max-width:410px;font-size:14px;color:#dbeafe;line-height:1.85;}
+.fb-benefits {gap:10px 14px;}
+.fb-benefits span {color:#eaf2ff;font-size:11px;}
+.fb-benefits svg {background:#ffffff1c;border-radius:50%;padding:2px;width:18px;height:18px;}
+.fb-preview {position:relative;overflow:hidden;padding:22px;margin-top:30px;border-radius:22px;background:linear-gradient(135deg,#ffffff20,#ffffff0b);border:1px solid #ffffff35;box-shadow:inset 0 1px 0 #ffffff20,0 20px 40px #102c6c25;animation:fb-float 7s ease-in-out infinite;}
+.fb-preview::before {content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(110deg,transparent 30%,#ffffff0c 45%,transparent 60%);background-size:250% 100%;animation:fb-gradient 9s ease infinite;}
+.fb-preview-top,.fb-preview-bottom {display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.fb-mini-brand {display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;}
+.fb-live {display:flex;align-items:center;gap:5px;font-size:9px;color:#dbeafe;}
+.fb-live i {width:5px;height:5px;border-radius:50%;background:#bfdbfe;box-shadow:0 0 9px #bfdbfe;}
+.fb-preview h2 {font-size:19px;line-height:1.4;letter-spacing:-.5px;margin:20px 0 4px;}
+.fb-preview p {margin:0 0 17px;}
+.fb-task {display:flex;align-items:center;gap:11px;padding:12px 10px;margin-top:8px;border:1px solid #ffffff18;background:#ffffff0b;border-radius:12px;transition:background .25s,transform .25s;}
+.fb-task-icon {width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:#ffffff18;color:#dbeafe;flex-shrink:0;}
+.fb-task > div {flex:1;min-width:0;}
+.fb-task strong {display:block;font-size:11px;font-weight:600;line-height:1.5;}
+.fb-task small {display:block;font-size:10px;color:#bfdbfe;line-height:1.6;margin-top:2px;}
+.fb-task-tag {font-size:8px;letter-spacing:.8px;background:#ffffff14;border:1px solid #ffffff18;border-radius:6px;padding:5px 6px;}
+.fb-task-check {color:#bfdbfe;flex-shrink:0;}
+.fb-preview-line {margin:17px 0;}
+.fb-preview-bottom > span:first-child {display:flex;align-items:center;gap:7px;font-size:10px;color:#dbeafe;}
+.fb-mini-dots {display:flex;gap:4px;}
+.fb-mini-dots i {width:5px;height:5px;border-radius:50%;background:#ffffff30;}
+.fb-mini-dots i:first-child {background:#bfdbfe;}
+.fb-panel {padding:34px 44px;background:linear-gradient(155deg,#fff,#fbfdff);}
+.fb-security {font-size:10px;letter-spacing:.2px;color:#64748b;}
+.fb-security svg {color:#2563eb;}
+.fb-form-content {padding:36px 0;}
+.fb-welcome-icon {position:relative;background:linear-gradient(145deg,#eff6ff,#e5efff);box-shadow:0 8px 18px #2563eb0a,inset 0 1px 0 #fff;margin-bottom:21px;transition:transform .3s;}
+.fb-eyebrow {display:block;font-size:9px;font-weight:700;letter-spacing:1.65px;color:#7c90af;margin-bottom:12px;}
+.fb-form-content h2 {font-size:39px;line-height:1.2;letter-spacing:-1.8px;}
+.fb-title-dot {color:#2563eb;}
+.fb-description {max-width:320px;font-size:13px;margin:12px 0 25px;line-height:1.8;}
+.fb-google {min-height:53px;border-radius:13px;box-shadow:0 2px 4px #17264203;transition:background .2s,border-color .2s,transform .2s;}
+.fb-divider {margin:23px 0;font-size:10px;}
+.fb-input {min-height:56px;border-radius:13px;background:#f8faff;transition:box-shadow .25s,border-color .25s,background .25s;}
+.fb-input:focus-within {background:#fff;border-color:#60a5fa;box-shadow:0 0 0 4px #2563eb0c,0 4px 12px #2563eb06;color:#2563eb;}
+.fb-input input {min-height:52px;}
+.fb-toggle {min-width:36px;min-height:40px;border-radius:8px;}
+.fb-forgot {min-height:30px;}
+.fb-submit {position:relative;isolation:isolate;overflow:hidden;min-height:56px;border-radius:13px;margin-top:25px;background:linear-gradient(110deg,#2158d9,#2563eb,#4384ff);background-size:200% 100%;animation:fb-gradient 7s ease infinite;box-shadow:0 10px 24px #2563eb33,inset 0 1px 0 #ffffff25;}
+.fb-submit::before {content:"";position:absolute;inset:0;z-index:-1;transform:translateX(-120%);background:linear-gradient(110deg,transparent,#ffffff22,transparent);transition:transform .65s;}
+.fb-submit > svg {transition:transform .25s;flex-shrink:0;}
+.fb-help {margin-top:21px;color:#7b8aa1;}
+.fb-footer {font-size:10px;line-height:1.6;}
+.fb-message {animation:fb-enter .25s ease both;}
+@keyframes fb-enter {from {opacity:0;transform:translateY(14px);}to {opacity:1;transform:translateY(0);}}
+@keyframes fb-float {0%,100% {transform:translateY(0);}50% {transform:translateY(-5px);}}
+@keyframes fb-drift {to {transform:translate(25px,35px);}}
+@keyframes fb-gradient {0%,100% {background-position:0% 50%;}50% {background-position:100% 50%;}}
+@media(hover:hover) {.fb-task:hover {background:#ffffff16;transform:translateX(3px);}.fb-submit:hover:not(:disabled)::before {transform:translateX(120%);}.fb-submit:hover:not(:disabled) > svg {transform:translateX(3px);}.fb-welcome-icon:hover {transform:rotate(-5deg);}.fb-toggle:hover {background:#eaf1ff;color:#2563eb;}}
+@media(min-width:851px) and (max-height:800px) {.fb-login {padding:20px;}.fb-story-content {padding-top:30px;}.fb-story h1 {font-size:44px;}.fb-panel {padding-top:28px;padding-bottom:28px;}.fb-form-content {padding:24px 0;}}
+@media(max-width:850px) {.fb-login {padding:22px 16px;}.fb-shell {max-width:590px;border-radius:26px;grid-template-columns:1fr;}.fb-story {padding:28px 32px;}.fb-story-content {padding:25px 0 0;}.fb-story h1 {font-size:38px;letter-spacing:-1.6px;}.fb-story h1 br {display:none;}.fb-story h1 span {display:block;margin-top:4px;}.fb-story-content > p {max-width:460px;font-size:12px;margin-bottom:0;}.fb-benefits {margin-top:18px;}.fb-preview,.fb-story-footer {display:none;}.fb-panel {padding:28px 32px;}.fb-form-content {padding:26px 0 30px;max-width:440px;}.fb-welcome-icon {width:48px;height:48px;border-radius:14px;margin-bottom:18px;}.fb-form-content h2 {font-size:34px;}.fb-security {justify-content:center;}.fb-footer {text-align:center;}}
+@media(max-width:480px) {.fb-login {padding:12px;}.fb-shell {border-radius:22px;}.fb-story {padding:23px;}.fb-panel {padding:24px 23px;}.fb-brand {font-size:17px;gap:10px;}.fb-brand-icon {width:42px;height:42px;border-radius:12px;}.fb-brand small {font-size:8px;}.fb-story-content {padding-top:23px;}.fb-story h1 {font-size:30px;line-height:1.2;margin:17px 0 12px;letter-spacing:-1px;}.fb-pill {font-size:8px;letter-spacing:1.1px;padding:7px 10px;}.fb-benefits {gap:8px 11px;margin-top:15px;}.fb-benefits span {font-size:9px;}.fb-form-content h2 {font-size:32px;}.fb-eyebrow {font-size:8px;letter-spacing:1.25px;}.fb-description {font-size:12px;}.fb-password-heading {gap:8px;}.fb-help {font-size:10px;}.fb-background-orb {width:200px;height:200px;}}
+@media(max-width:360px) {.fb-login {padding:8px;}.fb-story,.fb-panel {padding:20px 17px;}.fb-brand {font-size:15px;}.fb-story h1 {font-size:27px;}.fb-forgot {font-size:10px!important;}}
+@media(prefers-reduced-motion:reduce) {.fb-login *,.fb-login *::before,.fb-login *::after,.fb-login-loading * {animation:none!important;transition:none!important;}.fb-spin {animation:fb-spin 1.5s linear infinite!important;}}
 `;
