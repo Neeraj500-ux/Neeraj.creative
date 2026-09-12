@@ -147,7 +147,7 @@ export default function AppShell() {
           </span>
           {!collapsed && (
             <div>
-              Creative Adhyayan<small>AGENCY WORKSPACE</small>
+              creative-crew<small>Welcome to the Creative Workspace!</small>
             </div>
           )}
         </Link>
