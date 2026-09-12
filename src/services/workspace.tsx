@@ -1,11 +1,14 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { FirebaseError } from "firebase/app";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -16,9 +19,11 @@ import { auth } from "../lib/firebase";
 import { seed, demoUsers } from "../lib/seed";
 import type { Entity, User } from "../types";
 
+type WorkspaceData = Record<string, Entity[]>;
+
 type Store = {
   user: User | null;
-  data: Record<string, Entity[]>;
+  data: WorkspaceData;
   loading: boolean;
   error: string;
   login: (email: string, password: string) => Promise<void>;
@@ -29,51 +34,138 @@ type Store = {
   refresh: () => Promise<void>;
 };
 
+type Snapshot = {
+  user: User | null;
+  data: WorkspaceData;
+};
+
 const Context = createContext<Store | undefined>(undefined);
-const tableNames = Object.keys(seed());
+
+const allowedTables = new Set(Object.keys(seed()));
+const adminRoles = new Set(["admin", "super_admin"]);
 
 function storageKey(uid: string) {
+  // Preserve data saved by the previous version.
   return `ca-firebase-data:${uid}`;
 }
 
-function readData(uid: string): Record<string, Entity[]> {
-  const saved = localStorage.getItem(storageKey(uid));
+function isObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
 
-  if (!saved) return seed();
+function errorMessage(error: unknown): string {
+  if (error instanceof FirebaseError) {
+    const messages: Record<string, string> = {
+      "auth/invalid-email": "Please enter a valid email address.",
+      "auth/invalid-credential": "Incorrect email or password.",
+      "auth/user-not-found": "Incorrect email or password.",
+      "auth/wrong-password": "Incorrect email or password.",
+      "auth/user-disabled": "This account has been disabled.",
+      "auth/too-many-requests":
+        "Too many login attempts. Please try again later.",
+      "auth/network-request-failed":
+        "Check your internet connection and try again.",
+      "auth/operation-not-allowed":
+        "Enable Email/Password login in Firebase Authentication.",
+      "auth/unauthorized-domain":
+        "Add this website domain to Firebase authorized domains.",
+    };
+
+    return messages[error.code] || "Firebase authentication failed.";
+  }
+
+  if (
+    error instanceof DOMException &&
+    ["QuotaExceededError", "NS_ERROR_DOM_QUOTA_REACHED"].includes(
+      error.name,
+    )
+  ) {
+    return "Browser storage is full. Your change could not be saved.";
+  }
+
+  if (error instanceof DOMException && error.name === "SecurityError") {
+    return "Browser storage is unavailable. Check your browser settings.";
+  }
+
+  if (error instanceof SyntaxError) {
+    return "Saved workspace data is unreadable. Your saved data was preserved.";
+  }
+
+  return error instanceof Error
+    ? error.message
+    : "Something went wrong. Please try again.";
+}
+
+function readData(uid: string): WorkspaceData {
+  const saved = window.localStorage.getItem(storageKey(uid));
+
+  if (saved === null) return seed();
 
   const parsed: unknown = JSON.parse(saved);
 
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isObject(parsed)) {
     throw new Error("Saved workspace data is invalid.");
   }
 
-  const result = parsed as Record<string, Entity[]>;
+  const result: WorkspaceData = {};
 
-  for (const table of tableNames) {
-    if (result[table] !== undefined && !Array.isArray(result[table])) {
-      throw new Error(`Saved ${table} data is invalid.`);
+  for (const table of allowedTables) {
+    const rows = parsed[table];
+
+    if (rows === undefined) {
+      result[table] = [];
+      continue;
     }
+
+    if (!Array.isArray(rows)) {
+      throw new Error(`Saved "${table}" data is invalid.`);
+    }
+
+    const ids = new Set<string>();
+
+    for (const row of rows) {
+      if (
+        !isObject(row) ||
+        typeof row.id !== "string" ||
+        !row.id.trim() ||
+        ids.has(row.id)
+      ) {
+        throw new Error(`Saved "${table}" contains an invalid record.`);
+      }
+
+      ids.add(row.id);
+    }
+
+    result[table] = rows as Entity[];
   }
 
   return result;
 }
 
 function workspaceUser(firebaseUser: FirebaseUser): User {
-  // Keep the existing User shape without granting administrator access.
+  // Use an employee template to preserve the existing project User shape.
+  // Firebase accounts never receive admin access automatically.
   const employee = demoUsers.find(
     (candidate) =>
-      !["admin", "super_admin", "leader"].includes(candidate.role),
+      !adminRoles.has(candidate.role) &&
+      candidate.role !== "leader",
   );
 
   if (!employee) {
-    throw new Error("An employee profile template is missing in lib/seed.");
+    throw new Error(
+      "No employee profile template was found in src/lib/seed.ts.",
+    );
   }
 
   return {
     ...employee,
     id: firebaseUser.uid,
     name:
-      firebaseUser.displayName ||
+      firebaseUser.displayName?.trim() ||
       firebaseUser.email?.split("@")[0] ||
       "Workspace member",
     email: firebaseUser.email || "",
@@ -82,35 +174,90 @@ function workspaceUser(firebaseUser: FirebaseUser): User {
   } as User;
 }
 
+function validateTable(table: string) {
+  if (!allowedTables.has(table)) {
+    throw new Error(`Unknown workspace table: ${table}`);
+  }
+}
+
+function makeActivity(
+  user: User,
+  action: string,
+  table: string,
+  details?: unknown,
+): Entity {
+  return {
+    id: crypto.randomUUID(),
+    name: `${user.name} ${action} ${table}`,
+    status: "Recorded",
+    owner_id: user.id,
+    created_at: new Date().toISOString(),
+    ...(details === undefined
+      ? {}
+      : { description: JSON.stringify(details) }),
+  } as Entity;
+}
+
 export function Provider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [data, setData] = useState<Record<string, Entity[]>>({});
+  const [snapshot, setSnapshot] = useState<Snapshot>({
+    user: null,
+    data: {},
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const uidRef = useRef<string | null>(null);
+  // Refs keep consecutive mutations independent of React render timing.
+  const snapshotRef = useRef<Snapshot>(snapshot);
+  const mountedRef = useRef(false);
+  const loginPendingRef = useRef(false);
+  const logoutPendingRef = useRef(false);
 
-  function clearWorkspace() {
-    uidRef.current = null;
-    setUser(null);
-    setData({});
-  }
+  const publish = useCallback((next: Snapshot) => {
+    snapshotRef.current = next;
 
-  function loadWorkspace(firebaseUser: FirebaseUser) {
-    const profile = workspaceUser(firebaseUser);
-    const records = readData(firebaseUser.uid);
+    if (mountedRef.current) {
+      setSnapshot(next);
+    }
+  }, []);
 
-    uidRef.current = firebaseUser.uid;
-    setUser(profile);
-    setData(records);
-    setError("");
-  }
+  const reportError = useCallback((cause: unknown) => {
+    const message = errorMessage(cause);
+
+    if (mountedRef.current) {
+      setError(message);
+    }
+
+    return new Error(message);
+  }, []);
+
+  const clearWorkspace = useCallback(() => {
+    publish({ user: null, data: {} });
+  }, [publish]);
+
+  const loadWorkspace = useCallback(
+    (firebaseUser: FirebaseUser) => {
+      const profile = workspaceUser(firebaseUser);
+      const records = readData(firebaseUser.uid);
+
+      // Never publish records for a session that has changed.
+      if (auth.currentUser?.uid !== firebaseUser.uid) return;
+
+      publish({ user: profile, data: records });
+
+      if (mountedRef.current) {
+        setError("");
+      }
+    },
+    [publish],
+  );
 
   useEffect(() => {
+    mountedRef.current = true;
+
     const unsubscribe = onAuthStateChanged(
       auth,
       (firebaseUser) => {
-        setLoading(true);
+        if (!mountedRef.current) return;
 
         try {
           if (firebaseUser) {
@@ -119,230 +266,329 @@ export function Provider({ children }: { children: ReactNode }) {
             clearWorkspace();
             setError("");
           }
-        } catch (err) {
+        } catch (cause) {
           clearWorkspace();
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Unable to load your workspace.",
-          );
+          reportError(cause);
         } finally {
-          setLoading(false);
+          if (mountedRef.current) {
+            setLoading(false);
+          }
         }
       },
-      (err) => {
+      (cause) => {
+        if (!mountedRef.current) return;
+
         clearWorkspace();
-        setError(err.message);
+        reportError(cause);
         setLoading(false);
       },
     );
 
-    return unsubscribe;
-  }, []);
+    // Sync workspace changes made in another tab of the same browser.
+    function handleStorage(event: StorageEvent) {
+      const firebaseUser = auth.currentUser;
 
-  async function refresh() {
-    setLoading(true);
+      if (
+        !firebaseUser ||
+        event.storageArea !== window.localStorage ||
+        (event.key !== null &&
+          event.key !== storageKey(firebaseUser.uid))
+      ) {
+        return;
+      }
+
+      try {
+        loadWorkspace(firebaseUser);
+      } catch (cause) {
+        // Preserve the current snapshot if external data is invalid.
+        reportError(cause);
+      }
+    }
+
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      mountedRef.current = false;
+      unsubscribe();
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [clearWorkspace, loadWorkspace, reportError]);
+
+  const refresh = useCallback(async () => {
+    if (mountedRef.current) {
+      setLoading(true);
+    }
 
     try {
       if (auth.currentUser) {
         loadWorkspace(auth.currentUser);
       } else {
         clearWorkspace();
+
+        if (mountedRef.current) setError("");
       }
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Unable to refresh workspace.",
-      );
-      throw err;
+    } catch (cause) {
+      throw reportError(cause);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
-  }
+  }, [clearWorkspace, loadWorkspace, reportError]);
 
-  async function login(email: string, password: string) {
-    setError("");
+  const login = useCallback(
+    async (email: string, password: string) => {
+      if (loginPendingRef.current || logoutPendingRef.current) {
+        throw new Error("Another authentication request is in progress.");
+      }
 
-    try {
-      const credential = await signInWithEmailAndPassword(
-        auth,
-        email.trim(),
-        password,
-      );
+      const cleanEmail = email.trim();
 
-      loadWorkspace(credential.user);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sign in.");
-      throw err;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        throw reportError(new Error("Please enter a valid email address."));
+      }
+
+      if (!password) {
+        throw reportError(new Error("Please enter your password."));
+      }
+
+      loginPendingRef.current = true;
+
+      if (mountedRef.current) setError("");
+
+      try {
+        const credential = await signInWithEmailAndPassword(
+          auth,
+          cleanEmail,
+          password,
+        );
+
+        if (mountedRef.current) {
+          loadWorkspace(credential.user);
+        }
+      } catch (cause) {
+        throw reportError(cause);
+      } finally {
+        loginPendingRef.current = false;
+      }
+    },
+    [loadWorkspace, reportError],
+  );
+
+  const demo = useCallback((_id: string) => {
+    if (mountedRef.current) {
+      setError("Demo login is disabled. Use your Firebase account.");
     }
-  }
+  }, []);
 
-  function demo(_id: string) {
-    setError("Demo login is disabled. Sign in with your Firebase account.");
-  }
+  const logout = useCallback(async () => {
+    if (logoutPendingRef.current || loginPendingRef.current) {
+      throw new Error("Another authentication request is in progress.");
+    }
 
-  async function logout() {
+    logoutPendingRef.current = true;
+
     try {
       await signOut(auth);
       clearWorkspace();
-      sessionStorage.removeItem("ca-user");
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sign out.");
-      throw err;
-    }
-  }
 
-  function requireUser() {
+      if (mountedRef.current) setError("");
+    } catch (cause) {
+      throw reportError(cause);
+    } finally {
+      logoutPendingRef.current = false;
+    }
+  }, [clearWorkspace, reportError]);
+
+  const requireUser = useCallback((): User => {
+    const currentUser = snapshotRef.current.user;
+
     if (
-      !user ||
-      !auth.currentUser ||
-      auth.currentUser.uid !== user.id ||
-      uidRef.current !== user.id
+      logoutPendingRef.current ||
+      !currentUser ||
+      auth.currentUser?.uid !== currentUser.id
     ) {
       throw new Error("Please sign in before changing workspace data.");
     }
 
-    return user;
-  }
+    return currentUser;
+  }, []);
 
-  function checkTable(table: string) {
-    if (!tableNames.includes(table)) {
-      throw new Error(`Unknown workspace table: ${table}`);
-    }
-  }
+  const persist = useCallback(
+    (next: WorkspaceData, currentUser: User) => {
+      if (auth.currentUser?.uid !== currentUser.id) {
+        throw new Error("Your session changed. Please sign in again.");
+      }
 
-  function persist(next: Record<string, Entity[]>, uid: string) {
-    // Save first so storage errors do not silently discard changes.
-    localStorage.setItem(storageKey(uid), JSON.stringify(next));
-    setData(next);
-  }
-
-  async function save(table: string, row: Partial<Entity>) {
-    try {
-      const currentUser = requireUser();
-      checkTable(table);
-
-      const currentData = readData(currentUser.id);
-      const id = row.id || crypto.randomUUID();
-      const existing = (currentData[table] || []).find(
-        (item) => item.id === id,
+      // Persist before updating the UI so a failed write stays visible.
+      window.localStorage.setItem(
+        storageKey(currentUser.id),
+        JSON.stringify(next),
       );
 
-      const full: Record<string, unknown> = {
-        team_id: currentUser.team_id,
-        ...existing,
-        ...row,
-        id,
-        owner_id: existing?.owner_id || currentUser.id,
-        created_at: existing?.created_at || new Date().toISOString(),
-      };
+      publish({ user: currentUser, data: next });
 
-      for (const field of ["assignee", "project_id", "client_id"]) {
-        if (full[field] === "") full[field] = null;
-      }
-
-      const next: Record<string, Entity[]> = {
-        ...currentData,
-        [table]: existing
-          ? (currentData[table] || []).map((item) =>
-              item.id === id ? (full as Entity) : item,
-            )
-          : [full as Entity, ...(currentData[table] || [])],
-      };
-
-      const activity = {
-        id: crypto.randomUUID(),
-        name: `${currentUser.name} ${
-          existing ? "updated" : "created"
-        } ${table}`,
-        status: "Recorded",
-        description: JSON.stringify({ before: existing, after: full }),
-        created_at: new Date().toISOString(),
-      } as Entity;
-
-      next.activity_logs = [
-        activity,
-        ...(next.activity_logs || []),
-      ];
-
-      if (table === "tasks") {
-        const notification = {
-          id: crypto.randomUUID(),
-          name: `${full.name || "Task"} · ${full.status || "Updated"}`,
-          status: "Unread",
-          assignee: full.assignee,
-          created_at: new Date().toISOString(),
-        } as Entity;
-
-        next.notifications = [
-          notification,
-          ...(next.notifications || []),
-        ];
-      }
-
-      persist(next, currentUser.id);
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save.");
-      throw err;
-    }
-  }
-
-  async function remove(table: string, id: string) {
-    try {
-      const currentUser = requireUser();
-      checkTable(table);
-
-      const currentData = readData(currentUser.id);
-
-      const next: Record<string, Entity[]> = {
-        ...currentData,
-        [table]: (currentData[table] || []).filter(
-          (item) => item.id !== id,
-        ),
-      };
-
-      const activity = {
-        id: crypto.randomUUID(),
-        name: `${currentUser.name} deleted ${table} ${id}`,
-        status: "Recorded",
-        created_at: new Date().toISOString(),
-      } as Entity;
-
-      next.activity_logs = [
-        activity,
-        ...(next.activity_logs || []),
-      ];
-
-      persist(next, currentUser.id);
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to delete.");
-      throw err;
-    }
-  }
-
-  return (
-    <Context.Provider
-      value={{
-        user,
-        data,
-        loading,
-        error,
-        login,
-        demo,
-        logout,
-        save,
-        remove,
-        refresh,
-      }}
-    >
-      {children}
-    </Context.Provider>
+      if (mountedRef.current) setError("");
+    },
+    [publish],
   );
+
+  const save = useCallback(
+    async (table: string, row: Partial<Entity>) => {
+      try {
+        const currentUser = requireUser();
+        validateTable(table);
+
+        if (!isObject(row)) {
+          throw new Error("The record must be an object.");
+        }
+
+        const id = row.id ?? crypto.randomUUID();
+
+        if (typeof id !== "string" || !id.trim()) {
+          throw new Error("The record ID is invalid.");
+        }
+
+        const currentData = readData(currentUser.id);
+        const rows = currentData[table] || [];
+        const existing = rows.find((item) => item.id === id);
+
+        // Undefined values should not erase existing fields.
+        const updates = Object.fromEntries(
+          Object.entries(row).filter(([, value]) => value !== undefined),
+        );
+
+        const full: Record<string, unknown> = {
+          team_id: currentUser.team_id,
+          ...existing,
+          ...updates,
+          id,
+          owner_id: existing?.owner_id || currentUser.id,
+          created_at:
+            existing?.created_at || new Date().toISOString(),
+        };
+
+        for (const field of ["assignee", "project_id", "client_id"]) {
+          if (full[field] === "") full[field] = null;
+        }
+
+        const record = full as Entity;
+
+        const next: WorkspaceData = {
+          ...currentData,
+          [table]: existing
+            ? rows.map((item) => (item.id === id ? record : item))
+            : [record, ...rows],
+        };
+
+        // Avoid generating audit entries for audit entries themselves.
+        if (table !== "activity_logs" && allowedTables.has("activity_logs")) {
+          next.activity_logs = [
+            makeActivity(
+              currentUser,
+              existing ? "updated" : "created",
+              table,
+              { before: existing, after: record },
+            ),
+            ...(next.activity_logs || []),
+          ];
+        }
+
+        if (table === "tasks" && allowedTables.has("notifications")) {
+          const notification = {
+            id: crypto.randomUUID(),
+            name: `${full.name || "Task"} · ${
+              full.status || "Updated"
+            }`,
+            status: "Unread",
+            assignee: full.assignee ?? null,
+            owner_id: currentUser.id,
+            created_at: new Date().toISOString(),
+          } as Entity;
+
+          next.notifications = [
+            notification,
+            ...(next.notifications || []),
+          ];
+        }
+
+        persist(next, currentUser);
+      } catch (cause) {
+        throw reportError(cause);
+      }
+    },
+    [persist, reportError, requireUser],
+  );
+
+  const remove = useCallback(
+    async (table: string, id: string) => {
+      try {
+        const currentUser = requireUser();
+        validateTable(table);
+
+        if (typeof id !== "string" || !id.trim()) {
+          throw new Error("The record ID is invalid.");
+        }
+
+        const currentData = readData(currentUser.id);
+        const rows = currentData[table] || [];
+        const existing = rows.find((item) => item.id === id);
+
+        // Missing records require no write or duplicate audit entry.
+        if (!existing) return;
+
+        const next: WorkspaceData = {
+          ...currentData,
+          [table]: rows.filter((item) => item.id !== id),
+        };
+
+        if (table !== "activity_logs" && allowedTables.has("activity_logs")) {
+          next.activity_logs = [
+            makeActivity(currentUser, "deleted", table, {
+              before: existing,
+            }),
+            ...(next.activity_logs || []),
+          ];
+        }
+
+        persist(next, currentUser);
+      } catch (cause) {
+        throw reportError(cause);
+      }
+    },
+    [persist, reportError, requireUser],
+  );
+
+  const value = useMemo<Store>(
+    () => ({
+      user: snapshot.user,
+      data: snapshot.data,
+      loading,
+      error,
+      login,
+      demo,
+      logout,
+      save,
+      remove,
+      refresh,
+    }),
+    [
+      snapshot,
+      loading,
+      error,
+      login,
+      demo,
+      logout,
+      save,
+      remove,
+      refresh,
+    ],
+  );
+
+  return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
-export function useWorkspace() {
+export function useWorkspace(): Store {
   const context = useContext(Context);
 
   if (!context) {
@@ -352,10 +598,10 @@ export function useWorkspace() {
   return context;
 }
 
-export function scoped(rows: Entity[], user: User | null) {
+export function scoped(rows: Entity[], user: User | null): Entity[] {
   if (!user) return [];
 
-  if (["admin", "super_admin"].includes(user.role)) return rows;
+  if (adminRoles.has(user.role)) return rows;
 
   return rows.filter(
     (row) =>
