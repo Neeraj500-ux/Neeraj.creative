@@ -1,4 +1,4 @@
-Creative Adhyayan Agency Workspace
+Creative Adhyayan CREATIVE WORKSPACE
 
 Extract ZIP. Open creative-adhyayan folder in VS Code.
 Open terminal where package.json is located.

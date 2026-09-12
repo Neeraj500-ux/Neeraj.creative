@@ -20,7 +20,7 @@ export default function Login() {
             <Layers />
           </span>
           <div>
-            Creative Adhyayan<small>AGENCY WORKSPACE</small>
+            creative-crew<small>CREATIVE WORKSPACE</small>
           </div>
         </div>
         <div>
@@ -55,13 +55,13 @@ export default function Login() {
           </div>
         </div>
         <small>
-          Creative Adhyayan · Practical skills. Meaningful progress.
+          creative-crew · Practical skills. Meaningful progress.
         </small>
       </section>
       <section className="login-form">
         <span className="eyebrow">WELCOME BACK</span>
         <h2>Let's get to work.</h2>
-        <p className="muted">Sign in to your agency workspace.</p>
+        <p className="muted">Sign in to your CREATIVE WORKSPACE.</p>
         <form
           onSubmit={async (e) => {
             e.preventDefault();

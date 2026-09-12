@@ -102,7 +102,7 @@ export default function Settings() {
           <p className="muted">
             Need help?{" "}
             <a href="mailto:Contact@creativeadhyayan.com">
-              Contact Creative Adhyayan
+              Contact creative-crew
             </a>
           </p>
         </div>

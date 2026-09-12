@@ -177,7 +177,7 @@ export function seed(): Record<string, Entity[]> {
     notifications: [
       {
         id: "n0",
-        name: "Welcome to your Creative Adhyayan workspace",
+        name: "Welcome to your creative-crew workspace",
         status: "Unread",
         description:
           "Explore the sample campaign, assign work and review your team capacity.",
