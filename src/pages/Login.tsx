@@ -204,6 +204,7 @@ export default function Login() {
 
           <div className="fb-form-content">
             <div className="fb-welcome-icon"><Layers size={27} /></div>
+            <span className="fb-form-badge"><Sparkles size={12} aria-hidden="true" /> A SPACE FOR YOUR NEXT BIG IDEA</span>
             <span className="fb-eyebrow">YOUR NEXT CHAPTER STARTS HERE</span>
             <h2 id="login-title">Welcome back<span className="fb-title-dot">.</span></h2>
             <p className="fb-description">
@@ -222,9 +223,14 @@ export default function Login() {
               {busy === "google" ? (
                 <LoaderCircle size={19} className="fb-spin" />
               ) : (
-                <span className="fb-google-letter" aria-hidden="true">G</span>
+                <svg className="fb-google-logo" width="20" height="20" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5Z" />
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65Z" />
+                  <path fill="#FBBC05" d="M10.53 28.59A14.41 14.41 0 0 1 9.75 24c0-1.59.28-3.13.78-4.59l-7.98-6.19A23.87 23.87 0 0 0 0 24c0 3.87.93 7.53 2.56 10.78l7.97-6.19Z" />
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.91-5.8l-7.73-6c-2.15 1.45-4.92 2.3-8.18 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48Z" />
+                </svg>
               )}
-              Continue with Google
+              <span>{busy === "google" ? "Connecting to Google…" : "Continue with Google"}</span>
             </button>
 
             <div className="fb-divider"><span>or use your email</span></div>
@@ -296,6 +302,7 @@ export default function Login() {
               </button>
             </form>
 
+            <div className="fb-trust-note"><ShieldCheck size={14} aria-hidden="true" /><span>Your workspace. A secure sign-in.</span></div>
             <p className="fb-help">
               Need an account? Contact your workspace administrator.
             </p>
@@ -517,4 +524,34 @@ const styles = `
 @media(max-width:480px) {.fb-login {padding:12px;}.fb-shell {border-radius:22px;}.fb-story {padding:23px;}.fb-panel {padding:24px 23px;}.fb-brand {font-size:17px;gap:10px;}.fb-brand-icon {width:42px;height:42px;border-radius:12px;}.fb-brand small {font-size:8px;}.fb-story-content {padding-top:23px;}.fb-story h1 {font-size:30px;line-height:1.2;margin:17px 0 12px;letter-spacing:-1px;}.fb-pill {font-size:8px;letter-spacing:1.1px;padding:7px 10px;}.fb-benefits {gap:8px 11px;margin-top:15px;}.fb-benefits span {font-size:9px;}.fb-form-content h2 {font-size:32px;}.fb-eyebrow {font-size:8px;letter-spacing:1.25px;}.fb-description {font-size:12px;}.fb-password-heading {gap:8px;}.fb-help {font-size:10px;}.fb-background-orb {width:200px;height:200px;}}
 @media(max-width:360px) {.fb-login {padding:8px;}.fb-story,.fb-panel {padding:20px 17px;}.fb-brand {font-size:15px;}.fb-story h1 {font-size:27px;}.fb-forgot {font-size:10px!important;}}
 @media(prefers-reduced-motion:reduce) {.fb-login *,.fb-login *::before,.fb-login *::after,.fb-login-loading * {animation:none!important;transition:none!important;}.fb-spin {animation:fb-spin 1.5s linear infinite!important;}}
+
+/* Refined finish and true four-color Google mark */
+.fb-google-logo {display:block;width:20px;height:20px;min-width:20px;flex:0 0 20px;}
+.fb-google {position:relative;background:#fff;border:1px solid #dadce0;min-height:54px;border-radius:14px;gap:12px;color:#3c4043;font-weight:600!important;letter-spacing:.1px;box-shadow:0 2px 5px #17264204;}
+.fb-google > span {line-height:1.5;}
+.fb-google > .fb-spin {width:20px;height:20px;flex-shrink:0;color:#4285f4;}
+.fb-form-badge {display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:7px 10px;margin:0 0 17px;border-radius:20px;border:1px solid #dbeafe;background:linear-gradient(110deg,#f0f7ff,#f8fbff);color:#2563eb;font-size:8px;letter-spacing:1px;font-weight:700;line-height:1.5;}
+.fb-eyebrow {display:none;}
+.fb-shell {border:1px solid #ffffffcc;box-shadow:0 40px 100px #1e40af14,0 8px 25px #17264206;}
+.fb-panel {background:radial-gradient(ellipse at 100% 0,#eff6ff80,transparent 50%),linear-gradient(160deg,#fff,#fcfdff);}
+.fb-welcome-icon {width:58px;height:58px;border-radius:18px;background:linear-gradient(145deg,#fff,#e6f0ff);border-color:#dbeafe;box-shadow:inset 0 2px 0 #fff,0 10px 22px #2563eb10;}
+.fb-welcome-icon::after {content:"";position:absolute;width:7px;height:7px;border-radius:50%;right:6px;top:6px;background:#60a5fa;box-shadow:0 0 0 3px #fff;}
+.fb-form-content {padding-top:32px;padding-bottom:32px;}
+.fb-form-content h2 {font-weight:750;letter-spacing:-1.7px;}
+.fb-input {border-color:#e0e7f2;background:linear-gradient(180deg,#fbfcff,#f7faff);box-shadow:inset 0 1px 2px #17264203;}
+.fb-input input::placeholder {color:#8e9bb0;}
+.fb-password-heading {margin-top:24px;}
+.fb-submit {margin-top:27px;box-shadow:0 10px 22px #2563eb2b,inset 0 1px 0 #ffffff35;border:1px solid #ffffff15;}
+.fb-trust-note {display:flex;align-items:center;justify-content:center;gap:6px;margin-top:19px;color:#7b8ba3;font-size:10px;line-height:1.6;}
+.fb-trust-note svg {color:#6087c1;flex-shrink:0;}
+.fb-help {padding-top:17px;margin-top:17px;border-top:1px solid #edf1f7;font-size:10px;}
+.fb-preview {border-color:#ffffff45;background:linear-gradient(135deg,#ffffff24,#ffffff0d);box-shadow:inset 0 1px 0 #ffffff30,0 20px 42px #102c6c30;}
+.fb-task {padding:13px 11px;border-radius:13px;}
+.fb-task-icon {background:linear-gradient(135deg,#ffffff25,#ffffff0a);border:1px solid #ffffff1c;}
+.fb-story-footer {letter-spacing:.25px;opacity:.8;}
+@media(hover:hover) {.fb-google:hover:not(:disabled) {background:#f8faff;border-color:#b5c9eb;box-shadow:0 4px 12px #2563eb0b;transform:translateY(-1px);}.fb-input:hover {border-color:#c5d5ee;}.fb-input:focus-within {border-color:#60a5fa;}}
+@media(max-width:850px) {.fb-form-content {padding-top:27px;padding-bottom:25px;}.fb-form-badge {margin-bottom:15px;}.fb-welcome-icon {width:50px;height:50px;border-radius:16px;}.fb-panel {padding:28px 32px;}.fb-security {font-size:10px;}}
+@media(max-width:480px) {.fb-panel {padding:25px 23px;}.fb-form-badge {font-size:7px;letter-spacing:.75px;padding:7px 9px;}.fb-google {min-height:54px;font-size:13px!important;}.fb-google-logo {width:20px;height:20px;}.fb-trust-note {font-size:9px;}.fb-form-content h2 {font-size:32px;}.fb-task {min-width:0;}}
+@media(max-width:360px) {.fb-panel {padding:23px 17px;}.fb-form-badge {letter-spacing:.3px;}.fb-google {gap:10px;font-size:12px!important;}}
+@media(prefers-reduced-motion:reduce) {.fb-login *,.fb-login *::before,.fb-login *::after {animation:none!important;transition:none!important;}}
 `;
