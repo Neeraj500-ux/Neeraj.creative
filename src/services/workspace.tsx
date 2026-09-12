@@ -161,7 +161,7 @@ function createProfile(firebaseUser: FirebaseUser): User {
       "Workspace member",
     email: firebaseUser.email ?? "",
     active: true,
-    team_id: null,
+    team_id: "",
   } as User;
 }
 
